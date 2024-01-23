@@ -2,7 +2,10 @@ mapSWToVariants = function(variants, SW) {
   variants = as.data.table(variants)
   SW = as.data.table(SW)[pos!='pos',]
 
-  SW = SW[, pos := as.numeric(pos)]
+  variants[,'Chr'] = standardizeChr(variants[,Chr])
+  SW[,'chrom'] = standardizeChr(SW[,chrom])
+  SW[,'pos'] = as.numeric(SW[,pos])
+
   SW = SW[variants, on=.(chrom=Chr, pos=Pos, ref=Ref, alt=Alt), mult='first'][, 1:ncol(SW)]
   return(SW)
 }

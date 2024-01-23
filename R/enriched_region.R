@@ -1,13 +1,12 @@
 ## Variants that overlap with the specified peaks
 varInEnRegionByPeaks = function(vdata, peaks) {
-  vdata[,'Index'] = 1:nrow(vdata)
-
+  colnames(vdata)[1:3] = c('chr','start','end')
   peaks = as.data.table(peaks)
-  colnames(peaks)[1:3] = c('Chr','Start','End')
-  indices = c(peaks[vdata, on=.(Chr=Chr, Start<=Start, End>=Start), nomatch=NULL][,Index],
-              peaks[vdata, on=.(Chr=Chr, Start<=End, End>=End), nomatch=NULL][,Index],
-              peaks[vdata, on=.(Chr=Chr, Start>=Start, End<=End), nomatch=NULL][,Index])
+  colnames(peaks)[1:3] = c('chr','start','end')
+  setkey(peaks, chr, start, end)
 
+  indices = foverlaps(vdata[,1:3], peaks[,1:3], type='any', which=TRUE)
+  indices = unique(indices[!is.na(indices[,yid]), xid])
   v = rep(0,nrow(vdata)); v[indices] = 1
   return(v)
 }

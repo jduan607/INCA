@@ -13,7 +13,7 @@ metadata[,`Experiment target` := gsub('-human','', `Experiment target`)] # Drop 
 
 target = unique(metadata[,.(`Experiment target`,`Biosample term name`)]) # Experiment targets
 
-## Differential expression of genes from shRNA-seq
+## Differential gene expression analyis from shRNA RNA-seq
 foreach(i = 1:nrow(target), .combine=c) %dopar% {
     files = suppressMessages( dplyr::left_join(target[i,], metadata, multiple='all') )
 

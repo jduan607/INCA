@@ -4,7 +4,7 @@ cores=detectCores(); registerDoMC(cores=cores-5)
 
 directory = 'https://raw.github.com/jduan607/INCA/master'
 
-file = fread(file.path(directory,'files.txt'), header=FALSE,nrow=1)[[1]]
+file = fread(file.path(directory,'ENCODE_shRNA/files.txt'), header=FALSE,nrow=1)[[1]]
 metadata = fread(file)
 metadata = metadata[`File assembly`=='hg19',] # hg19 genome assembly only
 metadata = metadata[`File Status`=='released',] # Omit archived files

@@ -1,5 +1,5 @@
 ---
-title: "An Introduction to INCA"
+title: 'An Introduction to INCA'
 author:
   - name: Jingqi Duan
   - name: Sunduz Keles
@@ -16,105 +16,199 @@ editor_options:
 ```{r eval=TRUE, echo=FALSE}
 suppressWarnings(library(knitr))
 suppressMessages(library(data.table))
-suppressMessages(library(GenomicRanges))
-suppressMessages(library(Rsamtools))
 ```
 
 # Introduction
 
-We have developed a pre-computed library containing aligned reads and peak information
-from the [ENCODE eCLIP-seq collection](https://www.encodeproject.org/search/?type=Experiment&control_type!=*&status=released&perturbed=false&assay_title=eCLIP&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&biosample_ontology.term_name=K562&biosample_ontology.term_name=HepG2&assembly=hg19&files.file_type=bed+narrowPeak&files.file_type=bam&assay_slims=RNA+binding) of 223 RBPs in HepG2 and K562 cell lines on the hg19 genome assembly. This library provides convenient access to epigenomic information of variants, offering a more direct view of variant-level information.
+We have developed a multi-step genetic variant scoring approach that leverages the ENCODE RNA-binding protein (RBP) data from the [eCLIP-seq collection](https://www.encodeproject.org/search/?type=Experiment&control_type!=*&status=released&perturbed=false&assay_title=eCLIP&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&biosample_ontology.term_name=K562&biosample_ontology.term_name=HepG2&assembly=hg19&files.file_type=bed+narrowPeak&files.file_type=bam&assay_slims=RNA+binding) together with [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) and integrates multiple computational approaches to evaluates variant impacts on RBP activities. 
 
-This document provides an introduction to the **INCAData** package. The **INCAData** package summarizes epigenomic information of variants, including (i) normalized aligned read counts and (ii) peak signal values from eCLIP-seq (or similar data type, e.g., ChIP-seq). The resulting output files can be further used within the **INCA** pacakge.
+This document provides an introduction to the **INCA** package. **INCA** derives three scores for the effect of each variant on each RBP activity using available cell lines: (i) ClinVar-quantiled SeqWeaver scores; (ii) a score of allelic effect on RBP binding derived from a pre-computed library of RBP eCLIP-seq experiments; and (iii) a gene impact score for the gene that the SNV is proximal to based on a pre-computed library of accompanying RNA-seq experiments (wild type and RBP knockdown by shRNA).
 
 # Installation
 
-**INCAData** will be submitted to Bioconductor. Currently, **INCAData** can be downloaded and installed in R by: 
+**INCA** will be submitted to Bioconductor. Currently, **INCA** can be downloaded and installed in R by: 
 
 ```{r eval=FALSE}
-devtools::install_github('jduan607/INCAData')
+devtools::install_github('jduan607/INCA')
 ```
 
-**INCAData** depends on the following \R{} packages:
+**INCA** depends on the following \R{} packages:
 
 (a) `r CRANpkg("data.table")` is used for reading, writing, and formatting large data.
 
-(b) `r Biocpkg("GenomicRanges")` is used for manipulating genomic intervals and variables defined along a genome
+(b) `r CRANpkg("foreach")` is used for 
 
-(c) `r Biocpkg("Rsamtools")` is used for manipulating BAM (Sequence Alignment/Map) files.
+(c) `r CRANpkg("HGNChelper")` is used for 
 
-# Example
+Parallel backend is not required to register, but it will reduce computing time. The parallel backend can be registered in the following way:
 
-We illustrate an example of [eCLIP-seq data targeting HNRNPK in K562 cell line](https://www.encodeproject.org/experiments/ENCSR268ETU/).
+```{r eval=FALSE}
+library(doMC)
+registerDoMC()
+```
 
-Accession | File type | Output type | Isogenic replicated | Genome assembly | ... 
-:---|:---|:---|:---|:---|:---|
-ENCFF525XIM|bam|alignments|1|hg19|...
-ENCFF049KXT|bam|alignments|2|hg19|...
-ENCFF742LSN|bam|alignments|control|hg19|...
-ENCFF448SCQ|bed narrowPeak|peaks|1,2 (IDR)|hg19|...
-ENCFF079MYZ|bed narrowPeak|peaks|1|hg19|...
-ENCFF769QNG|bed narrowPeak|peaks|2|hg19|...
+If not registered, set `parallel`=FALSE (as the default).
+
+# Input
+
+**INCA** takes as input a variant file with the following fields: _Chr_, _Pos_, _Start_, _End_, _Ref_, _Alt_, and _Gene_. 
+
+Chr|Pos|Start|End|Ref|Alt|Gene
+---|---|---|---|---|---|---
+chr7|75607155|75607155|75607155|A|G|POR
+chr7|75611756|75611756|75611756|C|T|POR
+...||||||
+chr7|75636240|75636240|75636240|T|C|STYXL1
+
+
+## Whole-genome Sequencing (WGS) Data
+
+We extracted the required information (Chr, Pos, Ref, Alt, Zyg) from the VCF files of WGS in HepG2 and K562 cell lines from the ENCODE project:
+  + HepG2: ENCFF713BPG
+  + K562: ENCFF752OAX
+    
+The corresponding code can be found in 'ExtractVCFInfo.py'.
+
+Note: Zyg = 0 - Homozygous reference; 1 - Heterozygous; 2 - Unknown; 3 - Homozygous alternative
+
+# Main Example in the Paper
+
+Variants in the example are in high linkage-disequilibrium with the SNP _rs1057868_. INCAscore is computed using the data for the RBP _HNRNPK_.
+
+## Load required data
+
+```{r eval=FALSE}
+library(INCA)
+
+directory = 'https://raw.github.com/jduan607/INCA/master'
+
+## GWAS
+variants = fread(file.path(directory, 'GWAS', 'final_data.txt'))
+SW = fread(file.path(directory,'GWAS','seqweaver_results.tsv'))
+SW = SW[,c(1:8, grep('HepG2|K562',colnames(SW))),with=FALSE] # the example focuses on HepG2 and K562
+
+## WGS
+wgs1 = fread(file.path(directory,'ENCODE_WGS','HepG2_WGS.txt.gz'))
+wgs2 = fread(file.path(directory,'ENCODE_WGS','K562_WGS.txt.gz'))
+
+## DGE
+dge1 = fread(file.path(directory,'ENCODE_shRNA/DGE','HNRNPK_HepG2_DGE.txt.gz'))
+dge2 = fread(file.path(directory,'ENCODE_shRNA/DGE','HNRNPK_K562_DGE.txt.gz'))
+
+## ENCODE - peak
+peak1 = fread(file.path(directory,'ENCODE_eCLIP/PeakSignals','HNRNPK_HepG2_PeakSignals.txt.gz'))
+peak2 = fread(file.path(directory,'ENCODE_eCLIP/PeakSignals','HNRNPK_K562_PeakSignals.txt.gz'))
+
+## ENCODE - read counts (Load if needed)
+exp1.1 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_HepG2_NormRC_Rep1.txt.gz')) 
+exp1.2 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_HepG2_NormRC_Rep2.txt.gz')) 
+ctrl1 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_HepG2_NormRC_Ctrl.txt.gz'))
+
+rc1.1 = compareRCToControl(exp1.1, ctrl1)
+rc1.2 = compareRCToControl(exp1.2, ctrl1)
+
+exp2.1 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_K562_NormRC_Rep1.txt.gz')) 
+exp2.2 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_K562_NormRC_Rep2.txt.gz')) 
+ctrl2 = fread(file.path(directory,'ENCODE_eCLIP/NormRC','HNRNPK_K562_NormRC_Ctrl.txt.gz'))
+
+rc2.1 = compareRCToControl(exp2.1, ctrl2)
+rc2.2 = compareRCToControl(exp2.2, ctrl2)
+```
+
+## Align genotypes of K562 and HepG2 cell lines to variants
+
+```{r eval=FALSE}
+variants = alignCellGenoToVar(variants, wgs1, wgs2, c('HepG2','K562'))
+```
+
+## ClinVar-quantiled SeqWeaver scores
+
+```{r eval=FALSE}
+variants = scoreClinVarQSW(variants, SW, 'HNRNPK', empirical=1)
+```
+
+## eCLIP-seq allelic effects
+
+```{r eval=FALSE}
+epg1 = list(list(peaks=peak1[signalValue_IDR>0,]),
+            list(peaks=peak1, threshold=0.5), # optional
+            list(counts=rc1.1, peaks=peak1[signalValue_IDR>0,], threshold=c(0.1,0.8)), # optional
+            list(counts=rc1.2, peaks=peak1[signalValue_IDR>0,], threshold=c(0.1,0.8))) # optional
+            
+epg2 = list(list(peaks=peak2[signalValue_IDR>0,]),
+            list(peaks=peak2, threshold=0.5), # optional
+            list(counts=rc2.1, peaks=peak2[signalValue_IDR>0,], threshold=c(0.1,0.8)), # optional
+            list(counts=rc2.2, peaks=peak2[signalValue_IDR>0,], threshold=c(0.1,0.8))) # optional
+
+# parallel = FALSE if no parallel backend registered
+variants = scoreAllelicEffect(variants, epg1, epg2, c('HepG2','K562'), window=15, parallel=TRUE)
+```
+
+### RBP-SNV impact on gene expression
+
+```{r eval=FALSE}
+epg1 = list(dge1[,.(gene,q_value)], # first element must be DE
+           list(peaks=peak1, threshold=1)) 
+epg2 = list(dge2[,.(gene,q_value)], 
+           list(peaks=peak2, threshold=1))
+# parallel = FALSE if no parallel backend registered
+variants = scoreVarImpactOnGE(variants, epg1, epg2, c('HepG2','K562'))
+```
+
+# Example with ChIP-seq
+
+**INCA** can be extended for ChIP-seq data to interrogate transcription factor binding. Here, we provide an example that scores variants using ChIP-seq data for the transcription factor _ATF3_ in [HepG2](https://www.encodeproject.org/experiments/ENCSR000BKE/) and [K562](https://www.encodeproject.org/experiments/ENCSR000BNU/) from [ENCODE](https://www.encodeproject.org/).
+
+## Load required inputs
+
+The required inputs are the same as those needed for RNA-binding proteins, with the exception that shRNA RNA-seq data are unavailable for transcription factors:
+
++ A variant file with the following fields: _Chr_, _Pos_, _Start_, _End_, _Ref_, _Alt_, and _Gene_.
++ Whole-genome sequencing data of two different cell lines/types with the following fields: _Chr_, _Pos_, _Ref_, _Alt_, _Zyg_.
++ bedNarrow peak files: _Chr_, _Start_, and _End_.
 
 ```{r}
-library(INCAData)
+directory = 'https://raw.github.com/jduan607/INCA/master'
+
+## GWAS
+variants = fread(file.path(directory, 'GWAS', 'final_data.txt'))
+
+## WGS
+wgs1 = fread(file.path(directory,'ENCODE_WGS','HepG2_WGS.txt.gz'))
+wgs2 = fread(file.path(directory,'ENCODE_WGS','K562_WGS.txt.gz'))
+
+## ENCODE - ATF3 ChIP-seq peaks
+peak1 = fread('https://www.encodeproject.org/files/ENCFF725ZKM/@@download/ENCFF725ZKM.bed.gz')[,c(1,2,3,7)]
+peak2 = fread('https://www.encodeproject.org/files/ENCFF251XOI/@@download/ENCFF251XOI.bed.gz')[,c(1,2,3,7)]
+colnames(peak1) = c('Chr','Start','End','signalValue_IDR')
+colnames(peak2) = c('Chr','Start','End','signalValue_IDR')
 ```
 
-## Normalized aligned read counts from ENCODE eCLIP-seq
+## Align genotypes of K562 and HepG2 cell lines to variants
 
-`summarizeReadCounts` calculates aligned read counts for each variant in the eCLIP-seq (**input**) experiment. The key parameters:
-
-* **input**: Input file name of the BAM file.
-* **scale**: Scaling factor. The default is 1,000,000.
-* **chrom**: Chromosomes. The default is chromosomes 1-22, X, and Y.
-* **output**: Output file name. The default is *NULL*.
-
-If **scale** is a non-zero value, then `summarizeReadCounts` normalizes aligned read counts by dividing the raw read counts by the total number of reads in the sample and then multiplying by **scale**.
-
-```{r, eval=TRUE}
-experiment = 'https://www.encodeproject.org/files/ENCFF525XIM/@@download/ENCFF525XIM.bam'
-
-## Normalized aligned read counts
-ex1.1 = summarizeReadCounts(experiment)
-head(ex1.1)
-
-## Raw aligned read counts
-ex1.2 = summarizeReadCounts(experiment, scale=0)
-head(ex1.2)
-
-## Calculate normalized aligned read counts for specific chromosomes
-#summarizeReadCounts(experiment, chrom=c('chr12','chr13'))
-
-## Save the calculated normalized aligned read counts
-#summarizeReadCounts(experiment, output='SF3B4_K562_NormRC_Rep1.txt.gz')
+```{r}
+variants = alignCellGenoToVar(variants, wgs1, wgs2, c('HepG2','K562'))
 ```
 
-## Peak signal values from ENCODE eCLIP-seq
+## ClinVar-quantiled DeepSEA scores
 
-`summarizePeakSignals` summarizes peak signal values generated from the "peak calling" in the eCLIP-seq (**input**) experiment. Peak signal values represent the measurement of overall (usually, average) enrichment for each region. Only regions with a p-value less than 0.05 under FDR control are included. The key parameters:
+DeepSEA (Zhou and Troyanskaya, 2015) is a deep learning-based framework trained on genome-wide chromatin profiles, including TF binding, DNase I–hypersensitive sites, and histone marks, to predict the chromatin effects of variant. INCA transforms DeepSEA scores of a variant to represent proportion of pathogenic ClinVar variants that have scores smaller than that of the given variant.
 
-* **input**: Input file name(s) of the narrowPeak BED file.
-* **suffix**: Additional information about each file. The default is *NULL*.
-* **chrom**: Chromosomes. The default is chromosomes 1-22, X, and Y.
-* **output**: Output file name. The default is *NULL*.
+```{r}
+ds = fread(file.path(directory,'GWAS','deepsea_results.txt.gz')) # DeepSea scores
+ds_quantile = fread(file.path(directory,'ClinVar_scores','clinvar_pathogenic_snv_ds_quantile.txt.gz')) # Quantiles
 
-```{r, eval=TRUE}
-experiment = c('https://www.encodeproject.org/files/ENCFF448SCQ/@@download/ENCFF448SCQ.bed.gz',
-               'https://www.encodeproject.org/files/ENCFF079MYZ/@@download/ENCFF079MYZ.bed.gz',
-               'https://www.encodeproject.org/files/ENCFF769QNG/@@download/ENCFF769QNG.bed.gz')
-suffix = c('IDR','Rep1','Rep2')
+variants = scoreClinVarQSW(variants, ds, 'ATF3', empirical=ds_quantile)
+```
 
-## Peak signal values from multiple replicates
-ex2.1 = summarizePeakSignals(experiment, suffix)
-head(ex2.1)
+## ChIP-seq allelic effects
 
-## Peak signal values from one file
-ex2.2 = summarizePeakSignals(experiment[1])
-head(ex2.2)
+We obtained IDR thresholded peak files from ENCODE. For each variant with an allelic difference between the cell lines (HepG2 and K562 in this example), INCA computes a score of allelic effect of TF binding. This score is set to 1 if the variant of interest resides within a binding region of the TF as defined by an IDR peak in one cell line, but not in the other cell line.
 
-## Combine peak signal values for specific chromosomes
-summarizePeakSignals(experiment, suffix, chrom=c('chr12','chr13'))
+```{r}
+epg1 = list(list(peaks=peak1))
+epg2 = list(list(peaks=peak2))
 
-## Save the combined peak signal values
-#summarizePeakSignals(experiment, suffix, output='SF3B4_K562_PeakSignals.txt.gz')
+# parallel = FALSE if no parallel backend registered
+variants = scoreAllelicEffect(variants, epg1, epg2, c('HepG2','K562'), window=15, parallel=TRUE)
 ```

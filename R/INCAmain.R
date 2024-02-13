@@ -47,7 +47,7 @@ scoreClinVarQSW = function(variants, SW, target, empirical = 0) {
 
     if (is.numeric(empirical)) {
         ## Load quantiles of SeqWeaver computed using ClinVar SNVs
-        directory = 'https://raw.github.com/jduan607/INCA/master/ClinVar_SeqWeaver_scores'
+        directory = 'https://raw.github.com/jduan607/INCA/master/ClinVar_scores'
         if (empirical == 0) {
             quantiles = fread(file.path(directory,'clinvar_snv_sw_quantile.txt.gz'))
         } else if (empirical == 1) {
